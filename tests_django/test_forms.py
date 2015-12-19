@@ -1,16 +1,19 @@
 from __future__ import unicode_literals, absolute_import
 from datetime import date, time
 from datetime import datetime
-
-from django.core.exceptions import ValidationError
-from django.contrib.auth.models import User
-from django.db.models import QuerySet
 from bs4 import BeautifulSoup
 import pytest
-from tests.models import Foo, FieldFromModelOneToOneTest, FormFromModelTest, FooField, RegisterFieldFactoryTest, FieldFromModelForeignKeyTest
-from tri.form import getattr_path, setattr_path, BoundField, AVOID_EMPTY_FORM
+
+from django.db.models import fields, QuerySet
+from django.contrib.auth.models import User
+
 from tri.struct import Struct
+
+from tri.form import getattr_path, setattr_path, BoundField, AVOID_EMPTY_FORM, ValidationError
 from tri.form import Form, Field, register_field_factory
+
+from tests_django.models import Foo, FieldFromModelForeignKeyTest, FormFromModelTest, FieldFromModelOneToOneTest, \
+    FooField, RegisterFieldFactoryTest
 
 
 class Data(Struct):
@@ -326,6 +329,11 @@ def test_help_text_from_model():
     assert Form(data=Data(foo='1'), fields=[Field.from_model(model=Foo, field_name='foo')], model=Foo).validate().fields[0].help_text == 'foo_help_text'
 
 
+def test_url():
+    assert Form(data=Data(foo=' 5  '), fields=[Field.url(name='foo')]).validate().fields[0].errors == {u'Enter a valid URL.'}
+    assert Form(data=Data(foo='http://www.example.com/foo/bar'), fields=[Field.url(name='foo')]).is_valid()
+
+
 @pytest.mark.django_db
 def test_choices_from_query_set():
     user = User.objects.create(username='foo')
@@ -349,7 +357,6 @@ def test_form_from_model():
 
 
 def test_field_from_model_supports_all_types():
-    from django.db.models import fields
     not_supported = []
     blacklist = {
         'AutoField',

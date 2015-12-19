@@ -5,27 +5,67 @@ from datetime import datetime
 from decimal import Decimal
 
 import re
-from django.core.exceptions import ValidationError
-from django.core.validators import validate_email, URLValidator
-from django.db.models import IntegerField, FloatField, TextField, BooleanField, AutoField, CharField, CommaSeparatedIntegerField, DateField, DateTimeField, DecimalField, EmailField, URLField, TimeField, ForeignKey, OneToOneField
-from django.template.context import Context
-from django.template.loader import render_to_string
-from django.utils.safestring import mark_safe
 from tri.named_struct import NamedStruct, NamedStructField
 from tri.struct import Struct, Frozen, merged
 from tri.declarative import evaluate, should_show, should_not_evaluate, creation_ordered, declarative, extract_subkeys, getattr_path, setattr_path, sort_after, setdefaults, collect_namespaces
 
 try:
-    from django.template.loader import get_template_from_string
-except ImportError:  # pragma: no cover
-    # Django 1.8+
+    from django.core.exceptions import ValidationError
+    from django.core.validators import validate_email
     # noinspection PyUnresolvedReferences
-    from django.template import engines
-    
-    def get_template_from_string(template_code, origin=None, name=None):
-        del origin, name  # the origin and name parameters seems not to be implemented in django 1.8
-        return engines['django'].from_string(template_code)
+    from django.core.validators import URLValidator
+    validate_url = URLValidator()
 
+    try:
+        from django.template.loader import get_template_from_string
+    except ImportError:  # pragma: no cover
+        # Django 1.8+
+        # noinspection PyUnresolvedReferences
+        from django.template import engines
+
+        def get_template_from_string(template_code, origin=None, name=None):
+            del origin, name  # the origin and name parameters seems not to be implemented in django 1.8
+            return engines['django'].from_string(template_code)
+
+    # template rendering
+    from django.template.context import Context
+    from django.template.loader import render_to_string
+    from django.utils.safestring import mark_safe
+except ImportError:
+    # werkzeug
+    class ValidationError(Exception):
+        def __init__(self, messages):
+            if isinstance(messages, list):
+                self.messages = messages
+            else:
+                self.messages = [messages]
+
+    def validate_email(email):
+        if re.match(r'[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}', email):
+            return email
+        else:
+            raise ValidationError('Enter a valid email address.')
+
+    def validate_url(url):
+        if re.match(r'.*://.*\..*', url):
+            return url
+        else:
+            raise ValidationError('Enter a valid URL.')
+
+    import jinja2
+
+    def get_template_from_string(s, name, origin):
+        del name, origin
+        return jinja2.Template(s)
+
+    Context = dict
+
+    mark_safe = jinja2.Markup
+
+    env = jinja2.Environment(loader=jinja2.PackageLoader('tri.form', 'templates_jinja2'))
+
+    def render_to_string(name, context):
+        return env.get_template(name).render(context)
 
 __version__ = '1.6.1'
 
@@ -59,22 +99,29 @@ def foreign_key_factory(model_field, **kwargs):
     kwargs['model'] = model_field.foreign_related_fields[0].model
     return Field.choice_queryset(**kwargs)
 
-# The order here is significant because of inheritance structure. More specific must be below less specific.
-_field_factory_by_django_field_type = OrderedDict([
-    (CharField, lambda model_field, **kwargs: Field(**kwargs)),
-    (URLField, lambda model_field, **kwargs: Field.url(**kwargs)),
-    (TimeField, lambda model_field, **kwargs: Field.time(**kwargs)),
-    (EmailField, lambda model_field, **kwargs: Field.email(**kwargs)),
-    (DecimalField, lambda model_field, **kwargs: Field.decimal(**kwargs)),
-    (DateField, lambda model_field, **kwargs: Field.date(**kwargs)),
-    (DateTimeField, lambda model_field, **kwargs: Field.datetime(**kwargs)),
-    (CommaSeparatedIntegerField, lambda model_field, **kwargs: Field.comma_separated(parent_field=Field.integer(**kwargs))),
-    (BooleanField, lambda model_field, **kwargs: Field.boolean(**kwargs)),
-    (TextField, lambda model_field, **kwargs: Field.text(**kwargs)),
-    (FloatField, lambda model_field, **kwargs: Field.float(**kwargs)),
-    (IntegerField, lambda model_field, **kwargs: Field.integer(**kwargs)),
-    (ForeignKey, foreign_key_factory),
-])
+try:
+    # noinspection PyUnresolvedReferences
+    from django.db.models import IntegerField, FloatField, TextField, BooleanField, AutoField, CharField, CommaSeparatedIntegerField, DateField, DateTimeField, DecimalField, EmailField, URLField, TimeField, ForeignKey, OneToOneField
+
+    # The order here is significant because of inheritance structure. More specific must be below less specific.
+    _field_factory_by_django_field_type = OrderedDict([
+        (CharField, lambda model_field, **kwargs: Field(**kwargs)),
+        (URLField, lambda model_field, **kwargs: Field.url(**kwargs)),
+        (TimeField, lambda model_field, **kwargs: Field.time(**kwargs)),
+        (EmailField, lambda model_field, **kwargs: Field.email(**kwargs)),
+        (DecimalField, lambda model_field, **kwargs: Field.decimal(**kwargs)),
+        (DateField, lambda model_field, **kwargs: Field.date(**kwargs)),
+        (DateTimeField, lambda model_field, **kwargs: Field.datetime(**kwargs)),
+        (CommaSeparatedIntegerField, lambda model_field, **kwargs: Field.comma_separated(parent_field=Field.integer(**kwargs))),
+        (BooleanField, lambda model_field, **kwargs: Field.boolean(**kwargs)),
+        (TextField, lambda model_field, **kwargs: Field.text(**kwargs)),
+        (FloatField, lambda model_field, **kwargs: Field.float(**kwargs)),
+        (IntegerField, lambda model_field, **kwargs: Field.integer(**kwargs)),
+        (ForeignKey, foreign_key_factory),
+    ])
+except ImportError:
+    # not running under django
+    _field_factory_by_django_field_type = None
 
 
 def register_field_factory(field_class, factory):
@@ -457,7 +504,7 @@ class Field(Frozen, FieldBase):
     def url(**kwargs):
         setdefaults(kwargs, dict(
             input_type='email',
-            parse=lambda string_value, **_: URLValidator(string_value) or string_value
+            parse=lambda string_value, **_: validate_url(string_value) or string_value
         ))
         return Field(**kwargs)
 
@@ -598,7 +645,12 @@ class Form(object):
         """
         self.request = request
         if data is None and request:
-            data = request.POST if request.method == 'POST' else request.GET
+            try:
+                # django
+                data = request.POST if request.method == 'POST' else request.GET
+            except AttributeError:
+                # werkzeug
+                data = request.form
 
         if isinstance(fields, dict):  # Declarative case
             fields = [merged(field, dict(name=name)) for name, field in fields.items()]

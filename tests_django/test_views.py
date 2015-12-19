@@ -1,7 +1,7 @@
 from __future__ import absolute_import
 
 import pytest
-from tests.models import CreateOrEditObjectTest, get_saved_something
+from tests_django.models import CreateOrEditObjectTest, get_saved_something
 from tri.struct import Struct
 
 from tri.form.views import create_object, edit_object
