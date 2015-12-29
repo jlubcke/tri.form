@@ -1,8 +1,7 @@
 from __future__ import unicode_literals, absolute_import
-from django.http import HttpResponseRedirect
-from django.template import RequestContext
-from django.template.loader import render_to_string
 from tri.form import Form, extract_subkeys
+from .http_compat import render_to_string, redirect, RequestContext, get_data_from_request
+from .db_compat import get_model_verbose_name, save_instance
 
 
 def edit_object(
@@ -11,7 +10,7 @@ def edit_object(
         redirect_to=None,
         on_save=lambda **kwargs: None,
         render=render_to_string,
-        redirect=lambda request, redirect_to: HttpResponseRedirect(redirect_to),
+        redirect=lambda request, redirect_to: redirect(redirect_to),
         **kwargs):
     assert 'is_create' not in kwargs
     assert 'model' not in kwargs
@@ -34,7 +33,7 @@ def create_object(
         redirect_to=None,
         on_save=lambda **kwargs: None,
         render=render_to_string,
-        redirect=lambda request, redirect_to: HttpResponseRedirect(redirect_to),
+        redirect=lambda request, redirect_to: redirect(redirect_to),
         **kwargs):
     assert 'is_create' not in kwargs
     return create_or_edit_object(
@@ -56,22 +55,22 @@ def create_or_edit_object(
         redirect_to=None,
         on_save=lambda **kwargs: None,
         render=render_to_string,
-        redirect=lambda request, redirect_to: HttpResponseRedirect(redirect_to),
+        redirect=lambda request, redirect_to: redirect(redirect_to),
         **kwargs):
     kwargs.setdefault('form__class', Form.from_model)
     kwargs.setdefault('template_name', 'tri_form/create_or_edit_object_block.html')
-    p = extract_subkeys(kwargs, 'form', defaults={'model': model, 'instance': instance, 'data': request.POST if request.method == 'POST' else None})
+    p = extract_subkeys(kwargs, 'form', defaults={'model': model, 'instance': instance, 'data': get_data_from_request(request) if request.method == 'POST' else None})
     form = kwargs['form__class'](**p)
 
     # noinspection PyProtectedMember
-    model_verbose_name = kwargs.get('model_verbose_name', model._meta.verbose_name.replace('_', ' '))
+    model_verbose_name = kwargs.get('model_verbose_name', get_model_verbose_name(model).replace('_', ' '))
 
     if request.method == 'POST' and form.is_valid():
         if is_create:
             assert instance is None
             instance = model()
         form.apply(instance)
-        instance.save()
+        save_instance(instance, **extract_subkeys(kwargs, 'save'))
 
         kwargs['instance'] = instance
         on_save(**kwargs)

@@ -1,6 +1,3 @@
-import pytest
-pytest.importorskip('django')
-
 from django.db.models import Model, IntegerField, BooleanField, FloatField, ForeignKey, OneToOneField
 
 saved_something = None

@@ -8,64 +8,9 @@ import re
 from tri.named_struct import NamedStruct, NamedStructField
 from tri.struct import Struct, Frozen, merged
 from tri.declarative import evaluate, should_show, should_not_evaluate, creation_ordered, declarative, extract_subkeys, getattr_path, setattr_path, sort_after, setdefaults, collect_namespaces
-
-try:
-    from django.core.exceptions import ValidationError
-    from django.core.validators import validate_email
-    # noinspection PyUnresolvedReferences
-    from django.core.validators import URLValidator
-    validate_url = URLValidator()
-
-    try:
-        from django.template.loader import get_template_from_string
-    except ImportError:  # pragma: no cover
-        # Django 1.8+
-        # noinspection PyUnresolvedReferences
-        from django.template import engines
-
-        def get_template_from_string(template_code, origin=None, name=None):
-            del origin, name  # the origin and name parameters seems not to be implemented in django 1.8
-            return engines['django'].from_string(template_code)
-
-    # template rendering
-    from django.template.context import Context
-    from django.template.loader import render_to_string
-    from django.utils.safestring import mark_safe
-except ImportError:
-    # werkzeug
-    class ValidationError(Exception):
-        def __init__(self, messages):
-            if isinstance(messages, list):
-                self.messages = messages
-            else:
-                self.messages = [messages]
-
-    def validate_email(email):
-        if re.match(r'[a-zA-Z0-9._-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4}', email):
-            return email
-        else:
-            raise ValidationError('Enter a valid email address.')
-
-    def validate_url(url):
-        if re.match(r'.*://.*\..*', url):
-            return url
-        else:
-            raise ValidationError('Enter a valid URL.')
-
-    import jinja2
-
-    def get_template_from_string(s, name, origin):
-        del name, origin
-        return jinja2.Template(s)
-
-    Context = dict
-
-    mark_safe = jinja2.Markup
-
-    env = jinja2.Environment(loader=jinja2.PackageLoader('tri.form', 'templates_jinja2'))
-
-    def render_to_string(name, context):
-        return env.get_template(name).render(context)
+from .http_compat import render_to_string, Context, validate_url, validate_email, mark_safe, ValidationError, get_template_from_string, \
+    get_data_from_request
+from .db_compat import get_fields, is_primary_key_field, is_nullable, is_blankable, get_field_verbose_name
 
 __version__ = '1.6.1'
 
@@ -119,9 +64,36 @@ try:
         (IntegerField, lambda model_field, **kwargs: Field.integer(**kwargs)),
         (ForeignKey, foreign_key_factory),
     ])
+
+    def get_factory(model_field):
+        factory = _field_factory_by_django_field_type.get(type(model_field))
+
+        if factory is None:
+            for django_field_type, func in reversed(_field_factory_by_django_field_type.items()):
+                if isinstance(model_field, django_field_type):
+                    factory = func
+                    break
+        assert factory is not None, type(model_field)
+        return factory
+
 except ImportError:
-    # not running under django
-    _field_factory_by_django_field_type = None
+    _field_factory_by_sqlalchemy_field_type = OrderedDict([
+        ('VARCHAR', lambda model_field, **kwargs: Field(**kwargs)),
+        ('TIME', lambda model_field, **kwargs: Field.time(**kwargs)),
+        ('DECIMAL', lambda model_field, **kwargs: Field.decimal(**kwargs)),
+        ('DATE', lambda model_field, **kwargs: Field.date(**kwargs)),
+        ('DATETIME', lambda model_field, **kwargs: Field.datetime(**kwargs)),
+        ('BOOLEAN', lambda model_field, **kwargs: Field.boolean(**kwargs)),
+        ('TEXT', lambda model_field, **kwargs: Field.text(**kwargs)),
+        ('FLOAT', lambda model_field, **kwargs: Field.float(**kwargs)),
+        ('INTEGER', lambda model_field, **kwargs: Field.integer(**kwargs)),
+        # (ForeignKey, foreign_key_factory),
+    ])
+
+    def get_factory(model_field):
+        factory = _field_factory_by_sqlalchemy_field_type.get(str(model_field.type).split('(')[0])
+        assert factory is not None
+        return factory
 
 
 def register_field_factory(field_class, factory):
@@ -131,6 +103,19 @@ def register_field_factory(field_class, factory):
 def default_parse(form, field, string_value):
     del form, field
     return string_value
+
+
+def help_text_from_model(form, field):
+    del form
+    if field.model is None:
+        return ''
+    else:
+        try:
+            # django
+            return field.model._meta.get_field_by_name(field.attr.rsplit('__', 1)[-1])[0].help_text or ''
+        except AttributeError:
+            # sql alchemy
+            return ''
 
 
 class FieldBase(NamedStruct):
@@ -168,7 +153,7 @@ class FieldBase(NamedStruct):
 
     # grab help_text from model if applicable
     # noinspection PyProtectedMember
-    help_text = NamedStructField(default=lambda form, field: '' if field.model is None else field.model._meta.get_field_by_name(field.attr.rsplit('__', 1)[-1])[0].help_text or '')
+    help_text = NamedStructField(default=help_text_from_model)
 
     editable = NamedStructField(default=True)
     strip_input = NamedStructField(default=True)
@@ -546,18 +531,11 @@ class Field(Frozen, FieldBase):
 
         setdefaults(kwargs, dict(
             name=field_name,
-            required=not model_field.null and not model_field.blank,
-            label=capitalize(model_field.verbose_name)
+            required=not is_nullable(model_field) and not is_blankable(model_field),
+            label=capitalize(get_field_verbose_name(model_field))
         ))
 
-        factory = _field_factory_by_django_field_type.get(type(model_field))
-
-        if factory is None:
-            for django_field_type, func in reversed(_field_factory_by_django_field_type.items()):
-                if isinstance(model_field, django_field_type):
-                    factory = func
-                    break
-        assert factory is not None
+        factory = get_factory(model_field)
         return factory(model_field=model_field, model=model, **kwargs)
 
     @staticmethod
@@ -645,12 +623,7 @@ class Form(object):
         """
         self.request = request
         if data is None and request:
-            try:
-                # django
-                data = request.POST if request.method == 'POST' else request.GET
-            except AttributeError:
-                # werkzeug
-                data = request.form
+            data = get_data_from_request(request)
 
         if isinstance(fields, dict):  # Declarative case
             fields = [merged(field, dict(name=name)) for name, field in fields.items()]
@@ -704,8 +677,8 @@ class Form(object):
 
         fields = []
         # noinspection PyProtectedMember
-        for field, _ in model._meta.get_fields_with_model():
-            if should_include(field.name) and not isinstance(field, AutoField):
+        for field in get_fields(model):
+            if should_include(field.name) and not is_primary_key_field(field):
                 subkeys = extract_subkeys(kwargs, field.name)
                 foo = subkeys.get('class', Field.from_model)(name=field.name, model=model, model_field=field, **subkeys)
                 if isinstance(foo, list):
