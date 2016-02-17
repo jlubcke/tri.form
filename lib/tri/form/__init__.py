@@ -8,7 +8,8 @@ from itertools import chain
 import re
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email, URLValidator
-from django.db.models import IntegerField, FloatField, TextField, BooleanField, AutoField, CharField, CommaSeparatedIntegerField, DateField, DateTimeField, DecimalField, EmailField, URLField, TimeField, ForeignKey, OneToOneField
+from django.db.models import IntegerField, FloatField, TextField, BooleanField, AutoField, CharField, CommaSeparatedIntegerField, DateField, DateTimeField, DecimalField, EmailField, URLField, TimeField, ForeignKey, OneToOneField, \
+    FileField
 from django.template.context import Context
 from django.template.loader import render_to_string
 from django.utils.safestring import mark_safe
@@ -74,6 +75,7 @@ _field_factory_by_django_field_type = OrderedDict([
     (TextField, lambda model_field, **kwargs: Field.text(**kwargs)),
     (FloatField, lambda model_field, **kwargs: Field.float(**kwargs)),
     (IntegerField, lambda model_field, **kwargs: Field.integer(**kwargs)),
+    (FileField, lambda model_field, **kwargs: Field.file(**kwargs)),
     (ForeignKey, foreign_key_factory),
 ])
 
@@ -86,6 +88,14 @@ def default_parse(form, field, string_value):
     del form, field
     return string_value
 
+
+def default_apply(form, field, instance):
+    del form
+    if field.attr is not None:
+        if field.value is not None:
+            setattr_path(instance, field.attr, field.value)
+        else:
+            setattr_path(instance, field.attr, field.value_list)
 
 MISSING = object()
 
@@ -105,6 +115,7 @@ class FieldBase(NamedStruct):
     """ @type: (Form, Field, object) -> boolean """
     parse = NamedStructField(default=default_parse)
     """ @type: (Form, Field, unicode) -> object """
+    parse_empty_string_as_none = NamedStructField(default=True)
     initial = NamedStructField()
     initial_list = NamedStructField()
     template = NamedStructField(default='tri_form/{style}_form_row.html')
@@ -124,6 +135,8 @@ class FieldBase(NamedStruct):
     is_list = NamedStructField(default=False)
     is_boolean = NamedStructField(default=False)
     model = NamedStructField()
+
+    apply = NamedStructField(default=default_apply)
 
     # grab help_text from model if applicable
     # noinspection PyProtectedMember
@@ -346,8 +359,6 @@ class Field(Frozen, FieldBase):
             original_parse = kwargs.get('parse', default_parse)
 
             def parse(form, field, string_value):
-                if string_value == '':
-                    return None
                 return original_parse(form=form, field=field, string_value=string_value)
 
             kwargs.update(
@@ -414,37 +425,46 @@ class Field(Frozen, FieldBase):
 
     @staticmethod
     def datetime(**kwargs):
+        iso_format = '%Y-%m-%d %H:%M:%S'
+
         def parse_datetime(string_value, **_):
             try:
-                return datetime.strptime(string_value, '%Y-%m-%d %H:%M:%S')
+                return datetime.strptime(string_value, iso_format)
             except ValueError as e:
                 raise ValidationError(e.message)
         setdefaults(kwargs, dict(
-            parse=parse_datetime
+            parse=parse_datetime,
+            render_value=lambda value, **_: value.strftime(iso_format),
         ))
         return Field(**kwargs)
 
     @staticmethod
     def date(**kwargs):
+        iso_format = '%Y-%m-%d'
+
         def parse_date(string_value, **_):
             try:
-                return datetime.strptime(string_value, '%Y-%m-%d').date()
+                return datetime.strptime(string_value, iso_format).date()
             except ValueError as e:
                 raise ValidationError(e.message)
         setdefaults(kwargs, dict(
-            parse=parse_date
+            parse=parse_date,
+            render_value=lambda value, **_: value.strftime(iso_format),
         ))
         return Field(**kwargs)
 
     @staticmethod
     def time(**kwargs):
+        iso_format = '%H:%M:%S'
+
         def parse_time(string_value, **_):
             try:
-                return datetime.strptime(string_value, '%H:%M:%S').time()
+                return datetime.strptime(string_value, iso_format).time()
             except ValueError as e:
                 raise ValidationError(e.message)
         setdefaults(kwargs, dict(
-            parse=parse_time
+            parse=parse_time,
+            render_value=lambda value, **_: value.strftime(iso_format),
         ))
         return Field(**kwargs)
 
@@ -461,6 +481,16 @@ class Field(Frozen, FieldBase):
             input_type='email',
             parse=lambda string_value, **_: URLValidator(string_value) or string_value
         ))
+        return Field(**kwargs)
+
+    @staticmethod
+    def file(**kwargs):
+        setdefaults(kwargs, dict(
+            input_type='file',
+            template_string='{% extends "tri_form/table_form_row.html" %}{% block extra_content %}{{ field.value }}{% endblock %}',
+            apply=lambda form, field, instance: default_apply(form=form, field=field, instance=instance) if field.value else None
+        ))
+        # TODO: an empty field from a POST should be handled as "don't change the current value", NOT as "set it to NULL"
         return Field(**kwargs)
 
     @staticmethod
@@ -512,7 +542,8 @@ class Field(Frozen, FieldBase):
                 if isinstance(model_field, django_field_type):
                     factory = func
                     break
-        assert factory is not None
+        if factory is None:  # pragma: no cover
+            raise AssertionError('No factory for %s. Register a factory with tri.form.register_field_factory' % model_field)
         return factory(model_field=model_field, model=model, **kwargs)
 
     @staticmethod
@@ -721,7 +752,9 @@ class Form(object):
             elif field.is_boolean:
                 field.parsed_data = self.parse_field_raw_value(field, '0' if field.raw_data is None else field.raw_data)
             else:
-                if field.raw_data is not None:
+                if field.raw_data == '' and field.parse_empty_string_as_none:
+                    field.parsed_data = None
+                elif field.raw_data is not None:
                     field.parsed_data = self.parse_field_raw_value(field, field.raw_data)
                 else:
                     field.parsed_data = None
@@ -822,8 +855,4 @@ class Form(object):
                 field.value = field.initial
                 field.value_list = field.initial_list
 
-            if field.attr is not None:
-                if field.value is not None:
-                    setattr_path(instance, field.attr, field.value)
-                else:
-                    setattr_path(instance, field.attr, field.value_list)
+            field.apply(form=self, field=field, instance=instance)
