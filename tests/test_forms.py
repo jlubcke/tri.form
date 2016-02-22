@@ -360,7 +360,6 @@ def test_field_from_model_supports_all_types():
     from django.db.models import fields
     not_supported = []
     blacklist = {
-        'AutoField',
         'Field',
         'BigAutoField',
         'BinaryField',
