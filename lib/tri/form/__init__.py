@@ -14,7 +14,7 @@ from django.template.loader import render_to_string
 from django.utils.safestring import mark_safe
 from tri.named_struct import NamedStruct, NamedStructField
 from tri.struct import Struct, Frozen, merged
-from tri.declarative import evaluate, should_show, should_not_evaluate, creation_ordered, declarative, extract_subkeys, getattr_path, setattr_path, sort_after, setdefaults, collect_namespaces
+from tri.declarative import evaluate, should_show, should_not_evaluate, creation_ordered, declarative, getattr_path, setattr_path, sort_after, setdefaults, collect_namespaces
 
 try:
     from django.template.loader import get_template_from_string
@@ -74,6 +74,7 @@ _field_factory_by_django_field_type = OrderedDict([
     (TextField, lambda model_field, **kwargs: Field.text(**kwargs)),
     (FloatField, lambda model_field, **kwargs: Field.float(**kwargs)),
     (IntegerField, lambda model_field, **kwargs: Field.integer(**kwargs)),
+    (AutoField, lambda model_field, **kwargs: Field.integer(**kwargs)),
     (ForeignKey, foreign_key_factory),
 ])
 
@@ -653,11 +654,14 @@ class Form(object):
             return True
 
         fields = []
+        kwargs = collect_namespaces(kwargs)
         # noinspection PyProtectedMember
         for field, _ in model._meta.get_fields_with_model():
-            if should_include(field.name) and not isinstance(field, AutoField):
-                subkeys = extract_subkeys(kwargs, field.name)
-                foo = subkeys.get('class', Field.from_model)(name=field.name, model=model, model_field=field, **subkeys)
+            if should_include(field.name):
+                subkeys = kwargs.pop(field.name, {})
+                if isinstance(field, AutoField):
+                    subkeys.setdefault('show', False)
+                foo = subkeys.pop('class', Field.from_model)(name=field.name, model=model, model_field=field, **subkeys)
                 if isinstance(foo, list):
                     fields.extend(foo)
                 else:

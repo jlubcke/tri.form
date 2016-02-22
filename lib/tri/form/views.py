@@ -2,7 +2,9 @@ from __future__ import unicode_literals, absolute_import
 from django.http import HttpResponseRedirect
 from django.template import RequestContext
 from django.template.loader import render_to_string
-from tri.form import Form, extract_subkeys
+from tri.declarative import extract_subkeys
+
+from tri.form import Form
 
 
 def edit_object(
