@@ -3,6 +3,7 @@ from __future__ import unicode_literals, absolute_import
 from collections import OrderedDict
 from datetime import datetime
 from decimal import Decimal
+from itertools import chain
 
 import re
 from tri.named_struct import NamedStruct, NamedStructField
@@ -12,7 +13,7 @@ from .http_compat import render_to_string, Context, validate_url, validate_email
     get_data_from_request
 from .db_compat import get_fields, is_primary_key_field, is_nullable, is_blankable, get_field_verbose_name
 
-__version__ = '1.6.1'
+__version__ = '1.8.0'
 
 
 def capitalize(s):
@@ -117,15 +118,19 @@ def help_text_from_model(form, field):
             # sql alchemy
             return ''
 
+MISSING = object()
+
 
 class FieldBase(NamedStruct):
     name = NamedStructField()
 
     show = NamedStructField(default=True)
 
-    attr = NamedStructField()
-    id = NamedStructField()
-    label = NamedStructField()
+    attr = NamedStructField(default=MISSING)
+    id = NamedStructField(default=MISSING)
+    label = NamedStructField(default=MISSING)
+
+    after = NamedStructField()
 
     is_valid = NamedStructField(default=lambda form, field, parsed_data: (True, ''))
     """ @type: (Form, Field, object) -> boolean """
@@ -198,6 +203,13 @@ class BoundField(FieldBase):
 
     def __init__(self, field, form):
         super(BoundField, self).__init__(**field)
+        if self.attr is MISSING:
+            self.attr = self.name
+        if self.id is MISSING:
+            self.id = 'id_%s' % self.name if self.name else ''
+        if self.label is MISSING:
+            self.label = capitalize(self.name).replace('_', ' ') if self.name else ''
+
         self.form = form
         self.errors = set()
 
@@ -233,8 +245,10 @@ class BoundField(FieldBase):
     def render_container_css_classes(self):
         c = self.get('container_css_classes', set())
         if self.get('required', False) and self.get('editable', True):
+            c = set(c)
             c.add('required')
         if self.form.style == 'compact':
+            c = set(c)
             c.add('key-value')
         self['container_css_classes'] = c
         return self.render_css_classes('container_css_classes')
@@ -285,15 +299,6 @@ class Field(Frozen, FieldBase):
         :param render_value: render the parsed and validated value into a string. Default just converts to unicode: lambda form, field, value: unicode(value)
         :param is_list: interpret request data as a list (can NOT be a callable). Default False
         """
-
-        name = kwargs.get('name')
-        if name:
-            if not kwargs.get('attr'):
-                kwargs['attr'] = name
-            if not kwargs.get('id'):
-                kwargs['id'] = 'id_%s' % name
-            if not kwargs.get('label'):
-                kwargs['label'] = capitalize(name).replace('_', ' ')
 
         setdefaults(kwargs, dict(
             extra=Struct()
@@ -369,11 +374,6 @@ class Field(Frozen, FieldBase):
         ))
 
         if not kwargs['required'] and not kwargs['is_list']:
-            original_choices = kwargs['choices']
-
-            def choices(form, field):
-                return [None] + list(evaluate(original_choices, form=form, field=field))
-
             original_parse = kwargs.get('parse', default_parse)
 
             def parse(form, field, string_value):
@@ -382,7 +382,6 @@ class Field(Frozen, FieldBase):
                 return original_parse(form=form, field=field, string_value=string_value)
 
             kwargs.update(
-                choices=choices,
                 parse=parse
             )
 
@@ -393,16 +392,18 @@ class Field(Frozen, FieldBase):
 
             return parsed_data in field.choices, '%s not in available choices' % parsed_data
 
-        def choice_post_validation(form, field):
-            field.choice_tuples = [field.choice_to_option(form=form, field=field, choice=choice) if choice is not None else field.empty_choice_tuple
-                                   for choice in field.choices]
+        def post_validation(form, field):
+            choice_tuples = (field.choice_to_option(form=form, field=field, choice=choice) for choice in field.choices)
+            if not field['required'] and not field['is_list']:
+                choice_tuples = chain([field.empty_choice_tuple], choice_tuples)
+            field.choice_tuples = choice_tuples
 
         setdefaults(kwargs, dict(
             empty_choice_tuple=(None, '', kwargs['empty_label'], True),
             choice_to_option=lambda form, field, choice: (choice, unicode(choice), unicode(choice), choice == field.value),
             input_template='tri_form/choice.html',
             is_valid=choice_is_valid,
-            post_validation=choice_post_validation
+            post_validation=post_validation
         ))
         kwargs['choice_to_option'] = should_not_evaluate(kwargs['choice_to_option'])
         return Field(**kwargs)
