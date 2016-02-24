@@ -6,27 +6,13 @@ from decimal import Decimal
 from itertools import chain
 
 import re
-from django.core.exceptions import ValidationError
-from django.core.validators import validate_email, URLValidator
-from django.db.models import IntegerField, FloatField, TextField, BooleanField, AutoField, CharField, CommaSeparatedIntegerField, DateField, DateTimeField, DecimalField, EmailField, URLField, TimeField, ForeignKey, OneToOneField
-from django.template.context import Context
-from django.template.loader import render_to_string
-from django.utils.safestring import mark_safe
 from tri.named_struct import NamedStruct, NamedStructField
 from tri.struct import Struct, Frozen, merged
-from tri.declarative import evaluate, should_show, should_not_evaluate, creation_ordered, declarative, extract_subkeys, getattr_path, setattr_path, sort_after, setdefaults, collect_namespaces
-
-try:
-    from django.template.loader import get_template_from_string
-except ImportError:  # pragma: no cover
-    # Django 1.8+
-    # noinspection PyUnresolvedReferences
-    from django.template import engines
-    
-    def get_template_from_string(template_code, origin=None, name=None):
-        del origin, name  # the origin and name parameters seems not to be implemented in django 1.8
-        return engines['django'].from_string(template_code)
-
+from tri.declarative import evaluate, should_show, should_not_evaluate, creation_ordered, declarative, getattr_path, setattr_path, sort_after, setdefaults, collect_namespaces
+from .http_compat import render_to_string, Context, validate_url, validate_email, mark_safe, ValidationError, get_template_from_string, \
+    get_data_from_request
+from .db_compat import get_fields, is_primary_key_field, is_nullable, is_blankable, get_field_verbose_name, \
+    create_from_model
 
 __version__ = '1.8.0'
 
@@ -53,39 +39,88 @@ def bool_parse(string_value):
         raise ValueError('%s is not a valid boolean value' % string_value)
 
 
-def foreign_key_factory(model_field, **kwargs):
-    setdefaults(kwargs, dict(
-        choices=model_field.foreign_related_fields[0].model.objects.all()
-    ))
-    kwargs['model'] = model_field.foreign_related_fields[0].model
-    return Field.choice_queryset(**kwargs)
+try:
+    # noinspection PyUnresolvedReferences
+    from django.db.models import IntegerField, FloatField, TextField, BooleanField, AutoField, CharField, CommaSeparatedIntegerField, DateField, DateTimeField, DecimalField, EmailField, URLField, TimeField, ForeignKey, OneToOneField
 
-# The order here is significant because of inheritance structure. More specific must be below less specific.
-_field_factory_by_django_field_type = OrderedDict([
-    (CharField, lambda model_field, **kwargs: Field(**kwargs)),
-    (URLField, lambda model_field, **kwargs: Field.url(**kwargs)),
-    (TimeField, lambda model_field, **kwargs: Field.time(**kwargs)),
-    (EmailField, lambda model_field, **kwargs: Field.email(**kwargs)),
-    (DecimalField, lambda model_field, **kwargs: Field.decimal(**kwargs)),
-    (DateField, lambda model_field, **kwargs: Field.date(**kwargs)),
-    (DateTimeField, lambda model_field, **kwargs: Field.datetime(**kwargs)),
-    (CommaSeparatedIntegerField, lambda model_field, **kwargs: Field.comma_separated(parent_field=Field.integer(**kwargs))),
-    (BooleanField, lambda model_field, **kwargs: Field.boolean(**kwargs)),
-    (TextField, lambda model_field, **kwargs: Field.text(**kwargs)),
-    (FloatField, lambda model_field, **kwargs: Field.float(**kwargs)),
-    (IntegerField, lambda model_field, **kwargs: Field.integer(**kwargs)),
-    (ForeignKey, foreign_key_factory),
-])
+    def foreign_key_factory(model_field, **kwargs):
+        setdefaults(kwargs, dict(
+            choices=model_field.foreign_related_fields[0].model.objects.all()
+        ))
+        kwargs['model'] = model_field.foreign_related_fields[0].model
+        return Field.choice_queryset(**kwargs)
 
+    # The order here is significant because of inheritance structure. More specific must be below less specific.
+    _field_factory_by_django_field_type = OrderedDict([
+        (CharField, lambda model_field, **kwargs: Field(**kwargs)),
+        (URLField, lambda model_field, **kwargs: Field.url(**kwargs)),
+        (TimeField, lambda model_field, **kwargs: Field.time(**kwargs)),
+        (EmailField, lambda model_field, **kwargs: Field.email(**kwargs)),
+        (DecimalField, lambda model_field, **kwargs: Field.decimal(**kwargs)),
+        (DateField, lambda model_field, **kwargs: Field.date(**kwargs)),
+        (DateTimeField, lambda model_field, **kwargs: Field.datetime(**kwargs)),
+        (CommaSeparatedIntegerField, lambda model_field, **kwargs: Field.comma_separated(parent_field=Field.integer(**kwargs))),
+        (BooleanField, lambda model_field, **kwargs: Field.boolean(**kwargs)),
+        (TextField, lambda model_field, **kwargs: Field.text(**kwargs)),
+        (FloatField, lambda model_field, **kwargs: Field.float(**kwargs)),
+        (IntegerField, lambda model_field, **kwargs: Field.integer(**kwargs)),
+        (AutoField, lambda model_field, **kwargs: Field.integer(**kwargs)),
+        (ForeignKey, foreign_key_factory),
+    ])
 
-def register_field_factory(field_class, factory):
-    _field_factory_by_django_field_type[field_class] = factory
+    def get_factory(model_field):
+        factory = _field_factory_by_django_field_type.get(type(model_field))
+
+        if factory is None:
+            for django_field_type, func in reversed(_field_factory_by_django_field_type.items()):
+                if isinstance(model_field, django_field_type):
+                    factory = func
+                    break
+        assert factory is not None, type(model_field)
+        return factory
+
+    def register_field_factory(field_class, factory):
+        _field_factory_by_django_field_type[field_class] = factory
+
+except ImportError:
+    _field_factory_by_sqlalchemy_field_type = OrderedDict([
+        ('VARCHAR', lambda model_field, **kwargs: Field(**kwargs)),
+        ('TIME', lambda model_field, **kwargs: Field.time(**kwargs)),
+        ('DECIMAL', lambda model_field, **kwargs: Field.decimal(**kwargs)),
+        ('DATE', lambda model_field, **kwargs: Field.date(**kwargs)),
+        ('DATETIME', lambda model_field, **kwargs: Field.datetime(**kwargs)),
+        ('BOOLEAN', lambda model_field, **kwargs: Field.boolean(**kwargs)),
+        ('TEXT', lambda model_field, **kwargs: Field.text(**kwargs)),
+        ('FLOAT', lambda model_field, **kwargs: Field.float(**kwargs)),
+        ('INTEGER', lambda model_field, **kwargs: Field.integer(**kwargs)),
+        # (ForeignKey, foreign_key_factory),
+    ])
+
+    def get_factory(model_field):
+        factory = _field_factory_by_sqlalchemy_field_type.get(str(model_field.type).split('(')[0])
+        assert factory is not None
+        return factory
+
+    def register_field_factory(field_class, factory):
+        _field_factory_by_sqlalchemy_field_type[field_class] = factory
 
 
 def default_parse(form, field, string_value):
     del form, field
     return string_value
 
+
+def help_text_from_model(form, field):
+    del form
+    if field.model is None:
+        return ''
+    else:
+        try:
+            # django
+            return field.model._meta.get_field_by_name(field.attr.rsplit('__', 1)[-1])[0].help_text or ''
+        except AttributeError:
+            # sql alchemy
+            return ''
 
 MISSING = object()
 
@@ -127,7 +162,7 @@ class FieldBase(NamedStruct):
 
     # grab help_text from model if applicable
     # noinspection PyProtectedMember
-    help_text = NamedStructField(default=lambda form, field: '' if field.model is None else field.model._meta.get_field_by_name(field.attr.rsplit('__', 1)[-1])[0].help_text or '')
+    help_text = NamedStructField(default=help_text_from_model)
 
     editable = NamedStructField(default=True)
     strip_input = NamedStructField(default=True)
@@ -459,7 +494,7 @@ class Field(Frozen, FieldBase):
     def url(**kwargs):
         setdefaults(kwargs, dict(
             input_type='email',
-            parse=lambda string_value, **_: URLValidator(string_value) or string_value
+            parse=lambda string_value, **_: validate_url(string_value) or string_value
         ))
         return Field(**kwargs)
 
@@ -501,18 +536,11 @@ class Field(Frozen, FieldBase):
 
         setdefaults(kwargs, dict(
             name=field_name,
-            required=not model_field.null and not model_field.blank,
-            label=capitalize(model_field.verbose_name)
+            required=not is_nullable(model_field) and not is_blankable(model_field),
+            label=capitalize(get_field_verbose_name(model_field))
         ))
 
-        factory = _field_factory_by_django_field_type.get(type(model_field))
-
-        if factory is None:
-            for django_field_type, func in reversed(_field_factory_by_django_field_type.items()):
-                if isinstance(model_field, django_field_type):
-                    factory = func
-                    break
-        assert factory is not None
+        factory = get_factory(model_field)
         return factory(model_field=model_field, model=model, **kwargs)
 
     @staticmethod
@@ -600,7 +628,7 @@ class Form(object):
         """
         self.request = request
         if data is None and request:
-            data = request.POST if request.method == 'POST' else request.GET
+            data = get_data_from_request(request)
 
         if isinstance(fields, dict):  # Declarative case
             fields = [merged(field, dict(name=name)) for name, field in fields.items()]
@@ -644,25 +672,8 @@ class Form(object):
         self.is_valid()
 
     @staticmethod
-    def fields_from_model(model, include=None, exclude=None, **kwargs):
-        def should_include(name):
-            if exclude is not None and name in exclude:
-                return False
-            if include is not None:
-                return name in include
-            return True
-
-        fields = []
-        # noinspection PyProtectedMember
-        for field, _ in model._meta.get_fields_with_model():
-            if should_include(field.name) and not isinstance(field, AutoField):
-                subkeys = extract_subkeys(kwargs, field.name)
-                foo = subkeys.get('class', Field.from_model)(name=field.name, model=model, model_field=field, **subkeys)
-                if isinstance(foo, list):
-                    fields.extend(foo)
-                else:
-                    fields.append(foo)
-        return fields
+    def fields_from_model(**kwargs):
+        return create_from_model(default_facory=Field.from_model, **kwargs)
 
     @staticmethod
     def from_model(data, model, instance=None, include=None, exclude=None, extra_fields=None, post_validation=None, **kwargs):
@@ -681,7 +692,7 @@ class Form(object):
         :param exclude: fields to exclude. Defaults to none (except that AutoField is always excluded!)
 
         """
-        fields = Form.fields_from_model(model=model, include=include, exclude=exclude, **kwargs) + (extra_fields if extra_fields is not None else [])
+        fields = Form.fields_from_model(model=model, include=include, exclude=exclude, extra=extra_fields, **kwargs)
         return Form(data=data, model=model, instance=instance, fields=fields, post_validation=post_validation)
 
     def is_valid(self):

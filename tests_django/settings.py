@@ -2,7 +2,7 @@ import os
 BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 #
 # TEMPLATE_DIRS = [
-#     os.path.join(BASE_DIR, 'tests'),
+#     os.path.join(BASE_DIR, 'tests_django'),
 #     os.path.join(BASE_DIR, 'tri/form/templates'),
 # ]
 
@@ -13,7 +13,7 @@ INSTALLED_APPS = [
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'tri.form',
-    'tests'
+    'tests_django',
 ]
 
 DATABASES = {

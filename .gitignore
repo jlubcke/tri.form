@@ -4,6 +4,7 @@ env
 table.css.map
 .idea
 .DS_Store
+example.db
 
 # C extensions
 *.so
