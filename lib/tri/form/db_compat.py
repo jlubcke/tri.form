@@ -1,5 +1,7 @@
 import re
 
+from tri.declarative import collect_namespaces, assert_kwargs_empty
+
 
 def camel_to_snake(name):
     s1 = re.sub('(.)([A-Z][a-z]+)', r'\1_\2', name)
@@ -30,6 +32,33 @@ try:
 
     def save_instance(instance):
         instance.save()
+
+    def create_from_model(default_factory, model, include=None, exclude=None, extra=None, **kwargs):
+        def should_include(name):
+            if exclude is not None and name in exclude:
+                return False
+            if include is not None:
+                return name in include
+            return True
+
+        kwargs = collect_namespaces(kwargs)
+
+        fields = []
+        # noinspection PyProtectedMember
+        for field in get_fields(model):
+            if should_include(field.name):
+                subkeys = kwargs.pop(field.name, {})
+                subkeys.setdefault('class', default_factory)
+                if is_primary_key_field(field):
+                    subkeys.setdefault('show', False)
+                foo = subkeys.pop('class')(name=field.name, model=model, model_field=field, **subkeys)
+                if isinstance(foo, list):
+                    fields.extend(foo)
+                else:
+                    fields.append(foo)
+        assert_kwargs_empty(kwargs)
+        return fields + (extra if extra is not None else [])
+
 
 except ImportError:
     from sqlalchemy import inspect

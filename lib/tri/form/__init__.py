@@ -8,10 +8,11 @@ from itertools import chain
 import re
 from tri.named_struct import NamedStruct, NamedStructField
 from tri.struct import Struct, Frozen, merged
-from tri.declarative import evaluate, should_show, should_not_evaluate, creation_ordered, declarative, extract_subkeys, getattr_path, setattr_path, sort_after, setdefaults, collect_namespaces
+from tri.declarative import evaluate, should_show, should_not_evaluate, creation_ordered, declarative, getattr_path, setattr_path, sort_after, setdefaults, collect_namespaces
 from .http_compat import render_to_string, Context, validate_url, validate_email, mark_safe, ValidationError, get_template_from_string, \
     get_data_from_request
-from .db_compat import get_fields, is_primary_key_field, is_nullable, is_blankable, get_field_verbose_name
+from .db_compat import get_fields, is_primary_key_field, is_nullable, is_blankable, get_field_verbose_name, \
+    create_from_model
 
 __version__ = '1.8.0'
 
@@ -38,16 +39,16 @@ def bool_parse(string_value):
         raise ValueError('%s is not a valid boolean value' % string_value)
 
 
-def foreign_key_factory(model_field, **kwargs):
-    setdefaults(kwargs, dict(
-        choices=model_field.foreign_related_fields[0].model.objects.all()
-    ))
-    kwargs['model'] = model_field.foreign_related_fields[0].model
-    return Field.choice_queryset(**kwargs)
-
 try:
     # noinspection PyUnresolvedReferences
     from django.db.models import IntegerField, FloatField, TextField, BooleanField, AutoField, CharField, CommaSeparatedIntegerField, DateField, DateTimeField, DecimalField, EmailField, URLField, TimeField, ForeignKey, OneToOneField
+
+    def foreign_key_factory(model_field, **kwargs):
+        setdefaults(kwargs, dict(
+            choices=model_field.foreign_related_fields[0].model.objects.all()
+        ))
+        kwargs['model'] = model_field.foreign_related_fields[0].model
+        return Field.choice_queryset(**kwargs)
 
     # The order here is significant because of inheritance structure. More specific must be below less specific.
     _field_factory_by_django_field_type = OrderedDict([
@@ -63,6 +64,7 @@ try:
         (TextField, lambda model_field, **kwargs: Field.text(**kwargs)),
         (FloatField, lambda model_field, **kwargs: Field.float(**kwargs)),
         (IntegerField, lambda model_field, **kwargs: Field.integer(**kwargs)),
+        (AutoField, lambda model_field, **kwargs: Field.integer(**kwargs)),
         (ForeignKey, foreign_key_factory),
     ])
 
@@ -76,6 +78,9 @@ try:
                     break
         assert factory is not None, type(model_field)
         return factory
+
+    def register_field_factory(field_class, factory):
+        _field_factory_by_django_field_type[field_class] = factory
 
 except ImportError:
     _field_factory_by_sqlalchemy_field_type = OrderedDict([
@@ -96,9 +101,8 @@ except ImportError:
         assert factory is not None
         return factory
 
-
-def register_field_factory(field_class, factory):
-    _field_factory_by_django_field_type[field_class] = factory
+    def register_field_factory(field_class, factory):
+        _field_factory_by_sqlalchemy_field_type[field_class] = factory
 
 
 def default_parse(form, field, string_value):
@@ -668,25 +672,8 @@ class Form(object):
         self.is_valid()
 
     @staticmethod
-    def fields_from_model(model, include=None, exclude=None, **kwargs):
-        def should_include(name):
-            if exclude is not None and name in exclude:
-                return False
-            if include is not None:
-                return name in include
-            return True
-
-        fields = []
-        # noinspection PyProtectedMember
-        for field in get_fields(model):
-            if should_include(field.name) and not is_primary_key_field(field):
-                subkeys = extract_subkeys(kwargs, field.name)
-                foo = subkeys.get('class', Field.from_model)(name=field.name, model=model, model_field=field, **subkeys)
-                if isinstance(foo, list):
-                    fields.extend(foo)
-                else:
-                    fields.append(foo)
-        return fields
+    def fields_from_model(**kwargs):
+        return create_from_model(default_facory=Field.from_model, **kwargs)
 
     @staticmethod
     def from_model(data, model, instance=None, include=None, exclude=None, extra_fields=None, post_validation=None, **kwargs):
@@ -705,7 +692,7 @@ class Form(object):
         :param exclude: fields to exclude. Defaults to none (except that AutoField is always excluded!)
 
         """
-        fields = Form.fields_from_model(model=model, include=include, exclude=exclude, **kwargs) + (extra_fields if extra_fields is not None else [])
+        fields = Form.fields_from_model(model=model, include=include, exclude=exclude, extra=extra_fields, **kwargs)
         return Form(data=data, model=model, instance=instance, fields=fields, post_validation=post_validation)
 
     def is_valid(self):
