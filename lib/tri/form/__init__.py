@@ -31,7 +31,7 @@ except ImportError:  # pragma: no cover
         return engines['django'].from_string(template_code)
 
 
-__version__ = '1.13.0'
+__version__ = '1.13.1'
 
 
 def capitalize(s):
@@ -586,6 +586,7 @@ class Field(Frozen, FieldBase):
         setdefaults(kwargs, dict(
             name=field_name,
             required=not model_field.null and not model_field.blank,
+            parse_empty_string_as_none=not model_field.blank,
             label=capitalize(model_field.verbose_name)
         ))
 

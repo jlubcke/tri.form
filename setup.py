@@ -57,7 +57,7 @@ class ReleaseCheck(Command):
             raise SystemExit(1)
 
         current_branch = check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD']).strip()
-        if current_branch != 'master':
+        if current_branch != 'master' and current_branch != '1.13':
             print('Only release from master')
             raise SystemExit(1)
 
