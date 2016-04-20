@@ -1,6 +1,13 @@
 Changelog
 =========
 
+1.13.1 (2016-04-20)
+~~~~~~~~~~~~~~~~~~~
+
+* Fix broken blank field value on fields from django model when django model
+  blank setting is True.
+
+
 1.13.0 (2016-03-10)
 ~~~~~~~~~~~~~~~~~~~
 
