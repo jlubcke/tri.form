@@ -1189,3 +1189,18 @@ def test_instance_set_earlier_than_evaluate_is_called():
         foo = Field(initial=lambda form, **_: form.instance)
 
     MyForm()
+
+
+def test_field_from_model_path():
+    class FooForm(Form):
+        baz = Field.from_model(Foo, 'foo__foo')
+
+        class Meta:
+            model = Bar
+
+    assert FooForm(data=dict(baz='1')).fields[0].attr == 'foo__foo'
+    assert FooForm(data=dict(baz='1')).fields[0].name == 'baz'
+    assert FooForm(data=dict(baz='1')).fields[0].value == 1
+    assert not FooForm(data=dict(baz='asd')).is_valid()
+    fake = Struct(foo=Struct(foo='1'))
+    assert FooForm(instance=fake).fields[0].initial == '1'

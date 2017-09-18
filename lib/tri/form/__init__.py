@@ -194,8 +194,16 @@ def create_members_from_model(default_factory, model, member_params_by_member_na
 
 def member_from_model(model, factory_lookup, defaults_factory, factory_lookup_register_function=None, field_name=None, model_field=None, **kwargs):
     if model_field is None:
+        sub_field_name, _, field_path_rest = field_name.partition('__')
+
         # noinspection PyProtectedMember
-        model_field = model._meta.get_field(field_name)
+        model_field = model._meta.get_field(sub_field_name)
+
+        if field_path_rest:
+            result = member_from_model(model, factory_lookup=factory_lookup, defaults_factory=defaults_factory, factory_lookup_register_function=factory_lookup_register_function, field_name=sub_field_name, model_field=model_field, **kwargs)
+            result.name = field_name
+            result.attr = field_name
+            return result
 
     setdefaults_path(
         kwargs,
