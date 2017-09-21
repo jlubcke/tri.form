@@ -1204,3 +1204,7 @@ def test_field_from_model_path():
     assert not FooForm(data=dict(baz='asd')).is_valid()
     fake = Struct(foo=Struct(foo='1'))
     assert FooForm(instance=fake).fields[0].initial == '1'
+
+
+def test_create_members_from_model_path():
+    fields = Form.fields_from_model(model=Bar, include=['foo__foo'])
