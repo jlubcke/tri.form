@@ -150,6 +150,7 @@ def _django_field_defaults(model_field):
 
     if hasattr(model_field, 'blank'):
         r['parse_empty_string_as_none'] = not model_field.blank
+        r['skip_parse_on_empty_string'] = model_field.blank
 
     return r
 
@@ -532,6 +533,7 @@ class Field(RefinableObject):
     raw_data_list = Refinable()
 
     parse_empty_string_as_none = Refinable()
+    skip_parse_on_empty_string = Refinable()
     initial = Refinable()
     initial_list = Refinable()
     template = Refinable()
@@ -571,6 +573,7 @@ class Field(RefinableObject):
         extra=EMPTY,
         attrs__class=EMPTY,
         parse_empty_string_as_none=True,
+        skip_parse_on_empty_string=False,
         required=True,
         template='tri_form/{style}_form_row.html',
         input_template='tri_form/input.html',
@@ -1336,6 +1339,8 @@ class Form(RefinableObject):
             else:
                 if field.raw_data == '' and field.parse_empty_string_as_none:
                     field.parsed_data = None
+                if field.raw_data == '' and field.skip_parse_on_empty_string:
+                    field.parsed_data = ''
                 elif field.raw_data is not None:
                     field.parsed_data = self.parse_field_raw_value(field, field.raw_data)
                 else:
