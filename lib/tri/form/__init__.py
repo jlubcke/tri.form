@@ -504,20 +504,95 @@ Link.submit = Shortcut(
 
 
 @creation_ordered
-class Field(RefinableObject):
+class BaseModelField(RefinableObject):
+    name = Refinable()
+    show = Refinable()
+    attr = Refinable()
+    after = Refinable()
+
+    model = Refinable()
+    model_field = Refinable()
+
+    extra = Refinable()
+
+    @dispatch(
+        attr=MISSING,
+        show=True,
+        extra=EMPTY,
+    )
+    def __init__(self, **kwargs):
+        super(BaseModelField, self).__init__(**kwargs)
+
+    def __repr__(self):
+        return '<{}.{} {}>'.format(self.__class__.__module__, self.__class__.__name__, self.name)
+
+
+@creation_ordered
+class ReadModelField(BaseModelField):
+    display_name = Refinable()
+
+    @staticmethod
+    @refinable
+    def render_value(form, field, value):
+        # type: (Form, Field, object) -> unicode
+        return "%s" % value
+
+    # grab help_text from model if applicable
+    # noinspection PyProtectedMember
+    @staticmethod
+    @refinable
+    def help_text(field, **_):
+        if field.model is None or field.attr is None:
+            return ''
+        try:
+            return field.model._meta.get_field(field.attr.rsplit('__', 1)[-1]).help_text or ''
+        except FieldDoesNotExist:  # pragma: no cover
+            return ''
+
+    @staticmethod
+    @refinable
+    def read_from_instance(field, instance):
+        # type: (Field, object) -> None
+        return getattr_path(instance, field.attr)
+
+    @dispatch()
+    def __init__(self, **kwargs):
+        super(ReadModelField, self).__init__(**kwargs)
+
+    def _evaluate(self, not_evaluated_attributes=None):
+        """
+        Evaluates callable/lambda members. After this function is called all members will be values.
+        """
+        if not_evaluated_attributes is None:
+            not_evaluated_attributes = set()
+        evaluated_attributes = (x for x in self.get_declared('refinable_members').keys() if x not in not_evaluated_attributes)
+        for k in evaluated_attributes:
+            v = getattr(self, k)
+            new_value = evaluate_recursive(v, form=self.form, field=self)
+            if new_value is not v:
+                setattr(self, k, new_value)
+
+
+@creation_ordered
+class WriteModelField(BaseModelField):
+    @staticmethod
+    @refinable
+    def write_to_instance(field, instance, value):
+        # type: (Field, object, object) -> None
+        setattr_path(instance, field.attr, value)
+
+    @dispatch()
+    def __init__(self, **kwargs):
+        super(WriteModelField, self).__init__(**kwargs)
+
+
+@creation_ordered
+class Field(ReadModelField, WriteModelField):
     """
     Class that describes a field, i.e. what input controls to render, the label, etc.
     """
 
-    name = Refinable()
-
-    show = Refinable()
-
-    attr = Refinable()
     id = Refinable()
-    display_name = Refinable()
-
-    after = Refinable()
 
     # raw_data/raw_data contains the strings grabbed directly from the request data
     raw_data = Refinable()
@@ -536,14 +611,10 @@ class Field(RefinableObject):
 
     is_list = Refinable()
     is_boolean = Refinable()
-    model = Refinable()
-    model_field = Refinable()
 
     editable = Refinable()
     strip_input = Refinable()
     input_type = Refinable()
-
-    extra = Refinable()
 
     choices = Refinable()  # type: (Form, Field, str) -> None
     choice_to_option = Refinable()
@@ -556,11 +627,8 @@ class Field(RefinableObject):
     endpoint_path = Refinable()
 
     @dispatch(
-        attr=MISSING,
         id=MISSING,
         display_name=MISSING,
-        show=True,
-        extra=EMPTY,
         attrs__class=EMPTY,
         parse_empty_string_as_none=True,
         required=True,
@@ -670,36 +738,6 @@ class Field(RefinableObject):
 
     @staticmethod
     @refinable
-    def render_value(form, field, value):
-        # type: (Form, Field, object) -> unicode
-        return "%s" % value
-
-    # grab help_text from model if applicable
-    # noinspection PyProtectedMember
-    @staticmethod
-    @refinable
-    def help_text(field, **_):
-        if field.model is None or field.attr is None:
-            return ''
-        try:
-            return field.model._meta.get_field(field.attr.rsplit('__', 1)[-1]).help_text or ''
-        except FieldDoesNotExist:  # pragma: no cover
-            return ''
-
-    @staticmethod
-    @refinable
-    def read_from_instance(field, instance):
-        # type: (Field, object) -> None
-        return getattr_path(instance, field.attr)
-
-    @staticmethod
-    @refinable
-    def write_to_instance(field, instance, value):
-        # type: (Field, object, object) -> None
-        setattr_path(instance, field.attr, value)
-
-    @staticmethod
-    @refinable
     def endpoint_dispatch(field, key, **kwargs):
         parts = key.split(DISPATCH_PATH_SEPARATOR, 1)
         prefix = parts.pop(0)
@@ -741,13 +779,7 @@ class Field(RefinableObject):
         """
         Evaluates callable/lambda members. After this function is called all members will be values.
         """
-        not_evaluated_attributes = {'post_validation'}
-        evaluated_attributes = (x for x in self.get_declared('refinable_members').keys() if x not in not_evaluated_attributes)
-        for k in evaluated_attributes:
-            v = getattr(self, k)
-            new_value = evaluate_recursive(v, form=self.form, field=self)
-            if new_value is not v:
-                setattr(self, k, new_value)
+        super(Field, self)._evaluate(not_evaluated_attributes={'post_validation'})
 
         if not self.editable:
             self.input_template = 'tri_form/non_editable.html'
@@ -777,9 +809,6 @@ class Field(RefinableObject):
 
     def render_input_container_css_classes(self):
         return render_css_classes(self.input_container_css_classes)
-
-    def __repr__(self):
-        return '<{}.{} {}>'.format(self.__class__.__module__, self.__class__.__name__, self.name)
 
     @staticmethod
     def from_model(model, field_name=None, model_field=None, **kwargs):
