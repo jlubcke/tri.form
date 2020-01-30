@@ -133,7 +133,7 @@ def create_or_edit_object(
             actions__submit=dict(
                 call_target=Action.submit,
                 attrs__value=title,
-                attrs__name=form.get('name'),
+                attrs__name='/' + form.get('name') if form.get('name') else None,
             ),
         )
 

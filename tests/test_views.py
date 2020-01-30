@@ -323,7 +323,7 @@ def test_create_or_edit_object_default_template_with_name():
     expected_html = """
         <div class="form_buttons clear">
             <div class="links">
-                <input accesskey="s" class="button" name="form_name" type="submit" value="Create foo"/>
+                <input accesskey="s" class="button" name="/form_name" type="submit" value="Create foo"/>
             </div>
         </div>
     """
@@ -379,7 +379,7 @@ def test_create_or_edit_object_full_template(name):
     assert response.status_code == 200
 
     prefix = '' if not name else name + '/'
-    name_attr = '' if not name else f'name="{name}" '
+    name_attr = '' if not name else f'name="/{name}" '
 
     expected_html = f"""
 <html>

@@ -1,12 +1,19 @@
 Changelog
 ---------
 
+7.4.0 (2020-01-30)
+~~~~~~~~~~~~~~~~~~
+
+* Fix name attribute on submit action on edit_or_create forms to work with form.is_target() when the form has a name
+
+
 7.3.1 (2019-12-18)
 ~~~~~~~~~~~~~~~~~~
 
 * You can now customize the ajax dispatch page size by setting `extra__endpoint_page_size` on a field
 
 * Removed validation on `endpoint_dispatch_prefix` because in some cases we do want them to be out of sync (tri.table does this for example)
+
 
 7.3.0 (2019-12-06)
 ~~~~~~~~~~~~~~~~~~
