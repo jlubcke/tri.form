@@ -5,6 +5,13 @@
     :target: http://codecov.io/github/TriOptima/tri.form?branch=master
 
 
+.. warning::
+    tri.form is end of life. It has been merged into `iommi <http://iommi.rocks>`_.
+
+    iommi is backwards incompatible but the porting effort should be fairly mild,
+    the biggest changes are that `show` is now called `include` and plural is used
+    consistently for containers (so `field__foo` is `fields__foo` in iommi).
+
 tri.form
 ==========
 
