@@ -1,7 +1,7 @@
 Changelog
 ---------
 
-7.6.0 (----------)
+7.6.0 (2020-08-21)
 ~~~~~~~~~~~~~~~~~~
 
 * Include tri.struct 4.x as possible requirement
