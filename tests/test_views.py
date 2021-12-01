@@ -24,7 +24,7 @@ def test_create_or_edit_object():
     reset_saved_something()
 
     # 1. View create form
-    request = Struct(method='GET', META={}, GET={}, user=Struct(is_authenticated=lambda: True), is_ajax=lambda: False)
+    request = Struct(method='GET', META={}, GET={}, user=Struct(is_authenticated=lambda: True))
 
     response = create_object(
         request=request,
@@ -153,7 +153,7 @@ def test_redirect_default_case():
 def test_unique_constraint_violation():
     from tests.models import UniqueConstraintTest
 
-    request = Struct(method='POST', META={}, GET={}, user=Struct(is_authenticated=lambda: True), is_ajax=lambda: False)
+    request = Struct(method='POST', META={}, GET={}, user=Struct(is_authenticated=lambda: True))
     request.POST = {
         'f_int': '3',
         'f_float': '5.1',
@@ -183,7 +183,7 @@ def test_namespace_forms():
     reset_saved_something()
 
     # Create object
-    request = Struct(method='POST', META={}, GET={}, user=Struct(is_authenticated=lambda: True), is_ajax=lambda: False)
+    request = Struct(method='POST', META={}, GET={}, user=Struct(is_authenticated=lambda: True))
     request.POST = {
         'f_int': '3',
         'f_float': '5.1',
@@ -249,7 +249,7 @@ def test_create_or_edit_object_dispatch():
 
     f1 = Foo.objects.create(foo=1)
     f2 = Foo.objects.create(foo=2)
-    request = Struct(method='GET', META={}, GET={DISPATCH_PATH_SEPARATOR + 'field' + DISPATCH_PATH_SEPARATOR + 'foo': ''}, user=Struct(is_authenticated=lambda: True), is_ajax=lambda: True)
+    request = Struct(method='GET', META={'HTTP_X_REQUESTED_WITH': 'XMLHttpRequest'}, GET={DISPATCH_PATH_SEPARATOR + 'field' + DISPATCH_PATH_SEPARATOR + 'foo': ''}, user=Struct(is_authenticated=lambda: True))
 
     response = create_object(
         request=request,
@@ -273,7 +273,7 @@ def test_create_or_edit_object_dispatch():
 def test_create_object_default_template():
     from tests.models import Foo
 
-    request = Struct(method='GET', META={}, GET={}, user=Struct(is_authenticated=lambda: True), is_ajax=lambda: False)
+    request = Struct(method='GET', META={}, GET={}, user=Struct(is_authenticated=lambda: True))
 
     response = create_object(request=request, model=Foo)
     assert response.status_code == 200
@@ -294,7 +294,7 @@ def test_create_object_default_template():
 def test_edit_object_default_template():
     from tests.models import Foo
 
-    request = Struct(method='GET', META={}, GET={}, user=Struct(is_authenticated=lambda: True), is_ajax=lambda: False)
+    request = Struct(method='GET', META={}, GET={}, user=Struct(is_authenticated=lambda: True))
 
     response = edit_object(request=request, instance=Foo.objects.create(foo=1))
     assert response.status_code == 200
@@ -315,7 +315,7 @@ def test_edit_object_default_template():
 def test_create_or_edit_object_default_template_with_name():
     from tests.models import Foo
 
-    request = Struct(method='GET', META={}, GET={}, user=Struct(is_authenticated=lambda: True), is_ajax=lambda: False)
+    request = Struct(method='GET', META={}, GET={}, user=Struct(is_authenticated=lambda: True))
 
     response = create_object(request=request, model=Foo, form__name='form_name', form__endpoint_dispatch_prefix='form_name')
     assert response.status_code == 200
@@ -346,7 +346,6 @@ def test_create_or_edit_object_validate_unique():
             f'{DISPATCH_PATH_SEPARATOR}': '',
         },
         user=Struct(is_authenticated=lambda: True),
-        is_ajax=lambda: False,
     )
 
     response = create_object(request=request, model=Baz)
@@ -373,7 +372,7 @@ def test_create_or_edit_object_validate_unique():
 def test_create_or_edit_object_full_template(name):
     from tests.models import Foo
 
-    request = Struct(method='GET', META={}, GET={}, user=Struct(is_authenticated=lambda: True), is_ajax=lambda: False)
+    request = Struct(method='GET', META={}, GET={}, user=Struct(is_authenticated=lambda: True))
 
     response = create_object(request=request, model=Foo, form__name=name, form__endpoint_dispatch_prefix=name)
     assert response.status_code == 200

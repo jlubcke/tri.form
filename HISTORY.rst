@@ -1,6 +1,12 @@
 Changelog
 ---------
 
+7.7.0 (2021-12-01)
+~~~~~~~~~~~~~~~~~~
+
+* Remove use of deprecated HttpRequest.is_ajax()
+
+
 7.6.0 (2020-08-21)
 ~~~~~~~~~~~~~~~~~~
 

@@ -98,7 +98,7 @@ def dispatch_prefix_and_remaining_from_key(key):
 
 
 def handle_dispatch(request, obj):
-    if not request.is_ajax():
+    if not request.META.get('HTTP_X_REQUESTED_WITH') == 'XMLHttpRequest':
         return False, None
 
     for key, value in request.GET.items():

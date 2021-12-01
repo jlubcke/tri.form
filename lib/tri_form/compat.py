@@ -134,9 +134,6 @@ except ImportError:
         def META(self):
             return self.r.environ
 
-        def is_ajax(self):
-            return self.r.environ.get("HTTP_X_REQUESTED_WITH", "").lower() == "xmlhttprequest"
-
     def format_html(format_string, *args, **kwargs):
         return Markup(format_string).format(*args, **kwargs)
 
